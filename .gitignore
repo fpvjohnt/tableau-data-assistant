@@ -1,0 +1,41 @@
+# Environment variables
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+
+# Streamlit
+.streamlit/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data files (optional - remove if you want to track them)
+data/*.csv
+data/*.xlsx
+data/*.twb
+data/*.twbx
+
+# Logs
+logs/*.log
+
+# Cache
+cache/
+
+# Reports
+reports/*.pdf
+reports/*.html

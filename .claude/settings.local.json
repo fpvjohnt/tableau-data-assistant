@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cp /Users/nrjs/Desktop/Tableau_Project/scripts/tableau_chatbot.py /Users/nrjs/Desktop/Tableau_Project/scripts/tableau_chatbot_backup.py)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
