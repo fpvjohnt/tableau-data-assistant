@@ -2,15 +2,32 @@
 Screen recording and live analysis for Tableau dashboards
 Captures screen activity and provides real-time feedback using Claude Vision
 """
-import cv2
-import numpy as np
-import tempfile
 import base64
 from pathlib import Path
-from typing import List, Dict, Optional, Callable
+from typing import List, Dict, Optional, Callable, TYPE_CHECKING
 from datetime import datetime
 import time
-from PIL import Image, ImageGrab
+try:
+    from PIL import Image, ImageGrab
+    PIL_AVAILABLE = True
+except ImportError:  # pragma: no cover - handled via runtime guard
+    Image = None  # type: ignore
+    ImageGrab = None  # type: ignore
+    PIL_AVAILABLE = False
+
+if PIL_AVAILABLE:
+    try:
+        RESAMPLING_FILTER = Image.Resampling.LANCZOS  # type: ignore[attr-defined]
+    except AttributeError:  # pragma: no cover - depends on Pillow version
+        RESAMPLING_FILTER = getattr(Image, "LANCZOS", None)
+else:
+    RESAMPLING_FILTER = None
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from PIL import Image as PILImage
+    FrameProviderType = Optional[Callable[[], PILImage.Image]]
+else:
+    FrameProviderType = Optional[Callable[[], object]]
 import threading
 import queue
 
@@ -28,7 +45,9 @@ logger = get_logger(__name__)
 class ScreenRecorder:
     """Record and analyze screen activity in real-time"""
 
-    def __init__(self, fps: int = 2, quality: int = 80):
+    def __init__(self, fps: int = 2, quality: int = 80,
+                 frame_provider: FrameProviderType = None,
+                 use_mss: Optional[bool] = None):
         """
         Initialize screen recorder
 
@@ -36,12 +55,20 @@ class ScreenRecorder:
             fps: Frames per second to capture (lower = less API calls)
             quality: JPEG quality (1-100)
         """
+        if not PIL_AVAILABLE and frame_provider is None:
+            raise RuntimeError(
+                "Pillow is required for screen recording features. "
+                "Install the 'pillow' package to enable computer vision capture."
+            )
+
         self.fps = fps
         self.quality = quality
         self.is_recording = False
         self.frame_queue = queue.Queue(maxsize=10)
         self.analysis_callback = None
         self.capture_thread = None
+        self.frame_provider = frame_provider
+        self.use_mss = use_mss
 
         logger.info(f"Screen recorder initialized: fps={fps}, quality={quality}")
 
@@ -59,13 +86,21 @@ class ScreenRecorder:
 
         self.is_recording = True
 
-        if MSS_AVAILABLE:
+        if self.frame_provider is not None:
+            self.capture_thread = threading.Thread(
+                target=self._capture_loop_provider,
+                daemon=True
+            )
+        elif MSS_AVAILABLE and (self.use_mss is None or self.use_mss):
             self.capture_thread = threading.Thread(
                 target=self._capture_loop_mss,
                 args=(monitor, region),
                 daemon=True
             )
         else:
+            if self.use_mss is True and not MSS_AVAILABLE:
+                logger.warning("mss requested but not available, falling back to PIL ImageGrab")
+
             self.capture_thread = threading.Thread(
                 target=self._capture_loop_pil,
                 args=(region,),
@@ -80,7 +115,38 @@ class ScreenRecorder:
         self.is_recording = False
         if self.capture_thread:
             self.capture_thread.join(timeout=2)
+            self.capture_thread = None
         logger.info("Screen recording stopped")
+
+    def _enqueue_frame(self, image):
+        """Helper to enqueue a PIL image with timestamp."""
+        if image is None:
+            return
+
+        try:
+            self.frame_queue.put_nowait({
+                'timestamp': datetime.now(),
+                'image': image
+            })
+        except queue.Full:
+            logger.debug("Frame queue full, skipping frame")
+
+    def _capture_loop_provider(self):
+        """Capture loop using a custom frame provider callable."""
+        frame_delay = 1.0 / self.fps
+
+        while self.is_recording:
+            start_time = time.time()
+
+            try:
+                image = self.frame_provider()
+                self._enqueue_frame(image)
+            except Exception as exc:
+                logger.error(f"Error obtaining frame from provider: {exc}")
+
+            elapsed = time.time() - start_time
+            sleep_time = max(0, frame_delay - elapsed)
+            time.sleep(sleep_time)
 
     def _capture_loop_mss(self, monitor: int, region: Optional[tuple]):
         """Capture loop using mss (faster)"""
@@ -115,14 +181,7 @@ class ScreenRecorder:
                     )
 
                     # Add to queue (non-blocking)
-                    try:
-                        self.frame_queue.put_nowait({
-                            'timestamp': datetime.now(),
-                            'image': img
-                        })
-                    except queue.Full:
-                        # Skip frame if queue is full
-                        logger.debug("Frame queue full, skipping frame")
+                    self._enqueue_frame(img)
 
                 except Exception as e:
                     logger.error(f"Error capturing frame: {e}")
@@ -145,19 +204,17 @@ class ScreenRecorder:
                     bbox = (region[0], region[1],
                            region[0] + region[2],
                            region[1] + region[3])
-                    img = ImageGrab.grab(bbox=bbox)
                 else:
-                    img = ImageGrab.grab()
+                    bbox = None
+
+                img = ImageGrab.grab(bbox=bbox)
 
                 # Add to queue (non-blocking)
-                try:
-                    self.frame_queue.put_nowait({
-                        'timestamp': datetime.now(),
-                        'image': img
-                    })
-                except queue.Full:
-                    logger.debug("Frame queue full, skipping frame")
+                self._enqueue_frame(img)
 
+            except OSError as exc:
+                logger.error(f"ImageGrab not available in this environment: {exc}")
+                self.is_recording = False
             except Exception as e:
                 logger.error(f"Error capturing frame: {e}")
 
@@ -196,10 +253,14 @@ class ScreenRecorder:
 
         # Resize if too large (max 1280px width)
         max_width = 1280
-        if img.width > max_width:
-            ratio = max_width / img.width
-            new_size = (max_width, int(img.height * ratio))
-            img = img.resize(new_size, Image.Resampling.LANCZOS)
+        if hasattr(img, 'width') and hasattr(img, 'height') and hasattr(img, 'resize'):
+            if img.width > max_width:
+                ratio = max_width / img.width
+                new_size = (max_width, int(img.height * ratio))
+                if RESAMPLING_FILTER is not None:
+                    img = img.resize(new_size, RESAMPLING_FILTER)
+                else:
+                    img = img.resize(new_size)
 
         # Convert to JPEG bytes
         from io import BytesIO
@@ -236,7 +297,13 @@ class LiveAnalysisSession:
             analysis_prompt: Custom prompt for analysis
         """
         self.client = claude_client
-        self.recorder = ScreenRecorder(fps=1, quality=75)  # 1 FPS to save API calls
+        self.recorder_error: Optional[str] = None
+        try:
+            self.recorder = ScreenRecorder(fps=1, quality=75)  # 1 FPS to save API calls
+        except RuntimeError as exc:
+            self.recorder = None
+            self.recorder_error = str(exc)
+            logger.error(self.recorder_error)
         self.analysis_history = []
 
         self.default_prompt = analysis_prompt or """
@@ -259,11 +326,17 @@ class LiveAnalysisSession:
         Args:
             region: Optional screen region to capture
         """
+        if not self.recorder:
+            raise RuntimeError(self.recorder_error or "Screen recorder unavailable")
+
         self.recorder.start_recording(region=region)
         logger.info("Live analysis session started")
 
     def stop_session(self):
         """Stop live analysis session"""
+        if not self.recorder:
+            return
+
         self.recorder.stop_recording()
         logger.info("Live analysis session stopped")
 
@@ -278,6 +351,13 @@ class LiveAnalysisSession:
             Analysis result dictionary
         """
         # Get latest frame
+        if not self.recorder:
+            return {
+                'success': False,
+                'error': self.recorder_error or 'Screen recorder unavailable',
+                'timestamp': datetime.now()
+            }
+
         frame_data = self.recorder.get_latest_frame()
 
         if not frame_data:
