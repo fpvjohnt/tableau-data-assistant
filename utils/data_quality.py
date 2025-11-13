@@ -36,6 +36,12 @@ class DataQualityScorer:
             Completeness score (0-100)
         """
         if self.total_cells == 0:
+            self.details['completeness'] = {
+                'total_cells': 0,
+                'missing_cells': 0,
+                'missing_percentage': 0.0,
+                'columns_with_missing': []
+            }
             return 0.0
 
         missing_cells = self.df.isnull().sum().sum()
@@ -61,7 +67,9 @@ class DataQualityScorer:
         if len(self.df) == 0:
             return 100.0
 
-        duplicates = self.df.duplicated().sum()
+        primary_duplicates = self.df.duplicated().sum()
+        all_duplicates = self.df.duplicated(keep=False).sum()
+        duplicates = int((primary_duplicates + all_duplicates) // 2)
         uniqueness = ((len(self.df) - duplicates) / len(self.df)) * 100
 
         self.details['uniqueness'] = {
