@@ -116,6 +116,56 @@ KEYBOARD_SHORTCUTS = {
     "toggle_theme": "Ctrl+T"
 }
 
+# Responsible AI Configuration
+AI_MODE = os.getenv("AI_MODE", "cloud")  # "cloud" or "offline"
+ENABLE_ANOMALY_DETECTION = os.getenv("ENABLE_ANOMALY_DETECTION", "true").lower() == "true"
+ENABLE_SCREENSHOT_ANALYSIS = os.getenv("ENABLE_SCREENSHOT_ANALYSIS", "true").lower() == "true"
+MAX_ROWS_FOR_AI = int(os.getenv("MAX_ROWS_FOR_AI", "100"))
+MASK_PII = os.getenv("MASK_PII", "true").lower() == "true"
+
+# Privacy and Data Minimization
+PII_COLUMNS_KEYWORDS = [
+    "email", "mail", "e-mail",
+    "phone", "telephone", "mobile", "cell",
+    "ssn", "social_security",
+    "name", "first_name", "last_name", "full_name",
+    "address", "street", "city", "zip", "postal",
+    "credit_card", "card_number", "cvv",
+    "password", "passwd", "pwd",
+    "account_number", "account_id",
+    "customer_id", "user_id", "employee_id",
+    "ip_address", "ip", "mac_address",
+    "license", "passport", "driver"
+]
+
+# Validation Configuration
+VALIDATION_ENABLED = os.getenv("VALIDATION_ENABLED", "true").lower() == "true"
+NULL_THRESHOLD_PERCENT = float(os.getenv("NULL_THRESHOLD_PERCENT", "20.0"))  # Max % nulls allowed
+UNIQUENESS_THRESHOLD = float(os.getenv("UNIQUENESS_THRESHOLD", "95.0"))  # Min % unique for ID columns
+VALIDATION_SAMPLE_SIZE = int(os.getenv("VALIDATION_SAMPLE_SIZE", "10000"))  # Rows to sample for validation
+
+# Anomaly Detection Configuration
+ANOMALY_CONTAMINATION = float(os.getenv("ANOMALY_CONTAMINATION", "0.05"))  # Expected % of anomalies
+ANOMALY_N_ESTIMATORS = int(os.getenv("ANOMALY_N_ESTIMATORS", "100"))  # For Isolation Forest
+ANOMALY_MAX_FEATURES = float(os.getenv("ANOMALY_MAX_FEATURES", "1.0"))  # Features to use
+
+# Screenshot Analysis Configuration
+SCREENSHOT_MAX_SIZE_MB = int(os.getenv("SCREENSHOT_MAX_SIZE_MB", "10"))
+SCREENSHOT_MIN_DIMENSION = int(os.getenv("SCREENSHOT_MIN_DIMENSION", "400"))  # px
+SCREENSHOT_ANALYSIS_ASPECTS = [
+    "layout_clarity",
+    "label_readability",
+    "filter_placement",
+    "visual_clutter",
+    "accessibility",
+    "color_usage"
+]
+
+# Logging and Monitoring
+ENABLE_AUDIT_LOG = os.getenv("ENABLE_AUDIT_LOG", "true").lower() == "true"
+LOG_RETENTION_DAYS = int(os.getenv("LOG_RETENTION_DAYS", "30"))
+LOG_PII_SAFE = True  # Never log actual PII values
+
 def get_setting(key: str, default: Any = None) -> Any:
     """
     Get a configuration setting
@@ -156,3 +206,20 @@ def get_all_settings() -> Dict[str, Any]:
         key: value for key, value in globals().items()
         if not key.startswith("_") and key.isupper()
     }
+
+def get_settings() -> Dict[str, Any]:
+    """
+    Get all settings as a dictionary (alias for get_all_settings)
+
+    Returns:
+        Dictionary of all configuration settings
+    """
+    return get_all_settings()
+
+def is_ai_enabled() -> bool:
+    """Check if AI mode is enabled"""
+    return AI_MODE == "cloud"
+
+def is_offline_mode() -> bool:
+    """Check if running in offline mode"""
+    return AI_MODE == "offline"

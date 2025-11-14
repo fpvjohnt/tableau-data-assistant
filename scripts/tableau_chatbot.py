@@ -10,6 +10,9 @@ from pathlib import Path
 import base64
 from io import BytesIO
 from PIL import Image
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 # Load environment variables
 load_dotenv()
@@ -587,6 +590,231 @@ def detect_anomalies(df):
             })
 
     return anomalies
+
+def create_dashboard_metrics(df):
+    """Create example Tableau-style dashboard with key metrics"""
+    metrics = {}
+
+    numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+    categorical_cols = df.select_dtypes(include=['object']).columns.tolist()
+    date_cols = df.select_dtypes(include=['datetime64']).columns.tolist()
+
+    # Calculate key metrics
+    metrics['total_rows'] = len(df)
+    metrics['total_columns'] = len(df.columns)
+    metrics['data_quality_score'] = round((1 - df.isnull().sum().sum() / (len(df) * len(df.columns))) * 100, 1)
+
+    if numeric_cols:
+        # Get first numeric column for example metrics
+        first_numeric = numeric_cols[0]
+        metrics['sum'] = round(df[first_numeric].sum(), 2)
+        metrics['avg'] = round(df[first_numeric].mean(), 2)
+        metrics['max'] = round(df[first_numeric].max(), 2)
+        metrics['min'] = round(df[first_numeric].min(), 2)
+        metrics['metric_name'] = first_numeric
+
+    if categorical_cols:
+        metrics['unique_categories'] = df[categorical_cols[0]].nunique()
+        metrics['category_name'] = categorical_cols[0]
+
+    return metrics
+
+def create_example_visualizations(df):
+    """Create Tableau-style example visualizations using Plotly"""
+    visualizations = {}
+
+    numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+    categorical_cols = df.select_dtypes(include=['object']).columns.tolist()
+    date_cols = df.select_dtypes(include=['datetime64']).columns.tolist()
+
+    # Tableau color scheme
+    tableau_colors = ['#4E79A7', '#F28E2B', '#E15759', '#76B7B2', '#59A14F',
+                      '#EDC948', '#B07AA1', '#FF9DA7', '#9C755F', '#BAB0AC']
+
+    # 1. KPI Gauge Chart (if numeric data exists)
+    if numeric_cols:
+        col = numeric_cols[0]
+        current_value = df[col].mean()
+        max_value = df[col].max()
+
+        fig_gauge = go.Figure(go.Indicator(
+            mode="gauge+number+delta",
+            value=current_value,
+            domain={'x': [0, 1], 'y': [0, 1]},
+            title={'text': f"Average {col}", 'font': {'size': 20, 'color': '#ECECEC'}},
+            delta={'reference': max_value * 0.7, 'increasing': {'color': "#10a37f"}},
+            gauge={
+                'axis': {'range': [None, max_value], 'tickcolor': '#ECECEC'},
+                'bar': {'color': tableau_colors[0]},
+                'bgcolor': '#2f2f2f',
+                'borderwidth': 2,
+                'bordercolor': '#3f3f3f',
+                'steps': [
+                    {'range': [0, max_value * 0.5], 'color': '#3a1a1a'},
+                    {'range': [max_value * 0.5, max_value * 0.75], 'color': '#3a311a'},
+                    {'range': [max_value * 0.75, max_value], 'color': '#1a3a2e'}
+                ],
+                'threshold': {
+                    'line': {'color': '#10a37f', 'width': 4},
+                    'thickness': 0.75,
+                    'value': max_value * 0.9
+                }
+            }
+        ))
+
+        fig_gauge.update_layout(
+            paper_bgcolor='#212121',
+            plot_bgcolor='#212121',
+            font={'color': '#ECECEC'},
+            height=300
+        )
+        visualizations['gauge'] = fig_gauge
+
+    # 2. Bar Chart (top categories)
+    if categorical_cols and numeric_cols:
+        cat_col = categorical_cols[0]
+        num_col = numeric_cols[0]
+
+        # Get top 10 categories
+        top_data = df.groupby(cat_col)[num_col].sum().nlargest(10).reset_index()
+
+        fig_bar = go.Figure(data=[
+            go.Bar(
+                x=top_data[num_col],
+                y=top_data[cat_col],
+                orientation='h',
+                marker=dict(
+                    color=tableau_colors[1],
+                    line=dict(color='#3f3f3f', width=1)
+                ),
+                text=top_data[num_col].round(2),
+                textposition='auto',
+            )
+        ])
+
+        fig_bar.update_layout(
+            title=f'Top 10 {cat_col} by {num_col}',
+            xaxis_title=num_col,
+            yaxis_title=cat_col,
+            paper_bgcolor='#212121',
+            plot_bgcolor='#2f2f2f',
+            font={'color': '#ECECEC'},
+            height=400,
+            xaxis=dict(gridcolor='#3f3f3f'),
+            yaxis=dict(gridcolor='#3f3f3f')
+        )
+        visualizations['bar'] = fig_bar
+
+    # 3. Time Series Line Chart
+    if date_cols and numeric_cols:
+        date_col = date_cols[0]
+        num_col = numeric_cols[0]
+
+        time_data = df.groupby(date_col)[num_col].sum().reset_index()
+
+        fig_line = go.Figure(data=[
+            go.Scatter(
+                x=time_data[date_col],
+                y=time_data[num_col],
+                mode='lines+markers',
+                line=dict(color=tableau_colors[2], width=3),
+                marker=dict(size=8, color=tableau_colors[2]),
+                fill='tozeroy',
+                fillcolor='rgba(225, 87, 89, 0.2)'
+            )
+        ])
+
+        fig_line.update_layout(
+            title=f'{num_col} Over Time',
+            xaxis_title=date_col,
+            yaxis_title=num_col,
+            paper_bgcolor='#212121',
+            plot_bgcolor='#2f2f2f',
+            font={'color': '#ECECEC'},
+            height=400,
+            xaxis=dict(gridcolor='#3f3f3f'),
+            yaxis=dict(gridcolor='#3f3f3f'),
+            hovermode='x unified'
+        )
+        visualizations['line'] = fig_line
+
+    # 4. Distribution Histogram
+    if numeric_cols:
+        col = numeric_cols[0] if len(numeric_cols) > 0 else numeric_cols[0]
+
+        fig_hist = go.Figure(data=[
+            go.Histogram(
+                x=df[col],
+                nbinsx=30,
+                marker=dict(
+                    color=tableau_colors[4],
+                    line=dict(color='#3f3f3f', width=1)
+                )
+            )
+        ])
+
+        fig_hist.update_layout(
+            title=f'Distribution of {col}',
+            xaxis_title=col,
+            yaxis_title='Frequency',
+            paper_bgcolor='#212121',
+            plot_bgcolor='#2f2f2f',
+            font={'color': '#ECECEC'},
+            height=400,
+            xaxis=dict(gridcolor='#3f3f3f'),
+            yaxis=dict(gridcolor='#3f3f3f')
+        )
+        visualizations['histogram'] = fig_hist
+
+    # 5. Scatter Plot (if 2+ numeric columns)
+    if len(numeric_cols) >= 2:
+        x_col = numeric_cols[0]
+        y_col = numeric_cols[1]
+
+        fig_scatter = px.scatter(
+            df.sample(min(1000, len(df))),  # Sample for performance
+            x=x_col,
+            y=y_col,
+            color=categorical_cols[0] if categorical_cols else None,
+            title=f'{x_col} vs {y_col}',
+            color_discrete_sequence=tableau_colors
+        )
+
+        fig_scatter.update_layout(
+            paper_bgcolor='#212121',
+            plot_bgcolor='#2f2f2f',
+            font={'color': '#ECECEC'},
+            height=400,
+            xaxis=dict(gridcolor='#3f3f3f'),
+            yaxis=dict(gridcolor='#3f3f3f')
+        )
+        visualizations['scatter'] = fig_scatter
+
+    # 6. Pie Chart (if categorical with low cardinality)
+    if categorical_cols and numeric_cols:
+        cat_col = categorical_cols[0]
+        if df[cat_col].nunique() <= 8:
+            pie_data = df.groupby(cat_col)[numeric_cols[0]].sum().reset_index()
+
+            fig_pie = go.Figure(data=[
+                go.Pie(
+                    labels=pie_data[cat_col],
+                    values=pie_data[numeric_cols[0]],
+                    marker=dict(colors=tableau_colors, line=dict(color='#3f3f3f', width=2)),
+                    hole=0.4
+                )
+            ])
+
+            fig_pie.update_layout(
+                title=f'{cat_col} Composition',
+                paper_bgcolor='#212121',
+                font={'color': '#ECECEC'},
+                height=400,
+                showlegend=True
+            )
+            visualizations['pie'] = fig_pie
+
+    return visualizations
 
 def suggest_visualizations(df):
     """Suggest Tableau visualization templates based on data structure"""
@@ -1282,6 +1510,153 @@ with st.sidebar:
         st.session_state.messages = []
         st.session_state.uploaded_images = []
         st.rerun()
+
+# Dashboard Section - Show example visualizations if data is available
+if st.session_state.uploaded_files_info:
+    st.markdown("""
+    <div style="padding: 0.5rem 0; margin: 2rem 0 1rem 0; border-bottom: 2px solid rgba(16, 163, 127, 0.3);">
+        <h2 style="margin: 0; font-size: 1.5rem; color: #10a37f;">📊 Example Tableau Dashboard & Metrics</h2>
+        <p style="font-size: 0.875rem; color: #B4B4B4; margin-top: 0.5rem;">
+            Preview how your data would look in Tableau visualizations
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Get the most recent uploaded file's dataframe
+    if st.session_state.cleaned_dataframes:
+        latest_file = list(st.session_state.cleaned_dataframes.keys())[-1]
+        df_to_visualize = st.session_state.cleaned_dataframes[latest_file].get('cleaned')
+
+        if df_to_visualize is None:
+            df_to_visualize = st.session_state.cleaned_dataframes[latest_file].get('original')
+
+        if df_to_visualize is not None:
+            # Show metrics in cards
+            metrics = create_dashboard_metrics(df_to_visualize)
+
+            st.markdown(f"""
+            <div style="margin-bottom: 1.5rem;">
+                <h3 style="font-size: 1.1rem; color: #ECECEC; margin-bottom: 1rem;">
+                    Key Metrics - {latest_file}
+                </h3>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # Metrics row
+            metric_cols = st.columns(4)
+
+            with metric_cols[0]:
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg, #2f2f2f 0%, #1a1a1a 100%);
+                            padding: 1.5rem; border-radius: 8px; border: 1px solid #3f3f3f; text-align: center;">
+                    <div style="font-size: 2rem; color: #4E79A7; font-weight: 600;">
+                        {metrics['total_rows']:,}
+                    </div>
+                    <div style="font-size: 0.875rem; color: #B4B4B4; margin-top: 0.5rem;">
+                        Total Rows
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            with metric_cols[1]:
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg, #2f2f2f 0%, #1a1a1a 100%);
+                            padding: 1.5rem; border-radius: 8px; border: 1px solid #3f3f3f; text-align: center;">
+                    <div style="font-size: 2rem; color: #F28E2B; font-weight: 600;">
+                        {metrics['total_columns']}
+                    </div>
+                    <div style="font-size: 0.875rem; color: #B4B4B4; margin-top: 0.5rem;">
+                        Total Columns
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            with metric_cols[2]:
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg, #2f2f2f 0%, #1a1a1a 100%);
+                            padding: 1.5rem; border-radius: 8px; border: 1px solid #3f3f3f; text-align: center;">
+                    <div style="font-size: 2rem; color: #59A14F; font-weight: 600;">
+                        {metrics['data_quality_score']}%
+                    </div>
+                    <div style="font-size: 0.875rem; color: #B4B4B4; margin-top: 0.5rem;">
+                        Data Quality
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            with metric_cols[3]:
+                if 'avg' in metrics:
+                    st.markdown(f"""
+                    <div style="background: linear-gradient(135deg, #2f2f2f 0%, #1a1a1a 100%);
+                                padding: 1.5rem; border-radius: 8px; border: 1px solid #3f3f3f; text-align: center;">
+                        <div style="font-size: 2rem; color: #E15759; font-weight: 600;">
+                            {metrics['avg']:,.2f}
+                        </div>
+                        <div style="font-size: 0.875rem; color: #B4B4B4; margin-top: 0.5rem;">
+                            Avg {metrics.get('metric_name', 'Value')}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown(f"""
+                    <div style="background: linear-gradient(135deg, #2f2f2f 0%, #1a1a1a 100%);
+                                padding: 1.5rem; border-radius: 8px; border: 1px solid #3f3f3f; text-align: center;">
+                        <div style="font-size: 2rem; color: #76B7B2; font-weight: 600;">
+                            {metrics.get('unique_categories', 0)}
+                        </div>
+                        <div style="font-size: 0.875rem; color: #B4B4B4; margin-top: 0.5rem;">
+                            Unique Categories
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+            st.markdown("<div style='margin: 2rem 0;'></div>", unsafe_allow_html=True)
+
+            # Create visualizations
+            with st.spinner("Generating Tableau-style visualizations..."):
+                visualizations = create_example_visualizations(df_to_visualize)
+
+            if visualizations:
+                st.markdown("""
+                <div style="margin-bottom: 1rem;">
+                    <h3 style="font-size: 1.1rem; color: #ECECEC;">
+                        Example Visualizations
+                    </h3>
+                </div>
+                """, unsafe_allow_html=True)
+
+                # Display visualizations in a grid
+                if 'gauge' in visualizations:
+                    st.plotly_chart(visualizations['gauge'], use_container_width=True, key="gauge_chart")
+
+                viz_col1, viz_col2 = st.columns(2)
+
+                with viz_col1:
+                    if 'bar' in visualizations:
+                        st.plotly_chart(visualizations['bar'], use_container_width=True, key="bar_chart")
+                    if 'histogram' in visualizations:
+                        st.plotly_chart(visualizations['histogram'], use_container_width=True, key="hist_chart")
+
+                with viz_col2:
+                    if 'line' in visualizations:
+                        st.plotly_chart(visualizations['line'], use_container_width=True, key="line_chart")
+                    if 'scatter' in visualizations:
+                        st.plotly_chart(visualizations['scatter'], use_container_width=True, key="scatter_chart")
+
+                if 'pie' in visualizations:
+                    st.plotly_chart(visualizations['pie'], use_container_width=True, key="pie_chart")
+
+                st.markdown("""
+                <div style="background: #1a3a2e; padding: 1rem; border-radius: 8px;
+                            border-left: 3px solid #10a37f; margin: 2rem 0;">
+                    <p style="color: #7ee3c3; margin: 0; font-size: 0.875rem;">
+                        💡 <strong>Tip:</strong> These visualizations show how your data could look in Tableau.
+                        Use these as inspiration when building your actual Tableau dashboards!
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
+
+    st.markdown("<hr style='margin: 3rem 0; border: none; height: 1px; background: #3f3f3f;'>", unsafe_allow_html=True)
 
 # Chat interface - no header needed for ChatGPT style
 
